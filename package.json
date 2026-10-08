@@ -1,0 +1,14 @@
+{
+  "name": "pi-workspaces",
+  "version": "0.1.0",
+  "description": "Workspace and session switcher panel for Pi",
+  "type": "module",
+  "keywords": ["pi-package", "pi", "coding-agent", "workspaces", "sessions"],
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions/workspaces/index.ts"]
+  }
+}

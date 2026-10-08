@@ -5,14 +5,10 @@
  * (grouped by session cwd) and the sessions inside each one. Enter switches,
  * n starts a new session, o browses to any folder, r renames, d deletes.
  *
- * pi only exposes switchSession()/newSession() on the *command* context
- * (dist/modes/interactive/interactive-mode.js wires them into
- * createCommandContext(), not into the shortcut context built at
- * setupExtensionShortcuts). So the panel is pure UI: it resolves to a
- * PanelAction, and the command path performs it. The shortcut path cannot
- * switch sessions itself, so it queues the action and dispatches /ws-resume
- * through sendUserMessage with expandPromptTemplates, which makes pi run that
- * command with a real command context.
+ * pi only exposes switchSession()/newSession() on the command context, so
+ * both /ws and the keyboard shortcut dispatch the /ws command. The command
+ * path opens the panel and applies the selected action with a real command
+ * context.
  */
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
@@ -30,32 +26,6 @@ import {
 import { WorkspacePanel, type PanelAction } from "./panel.ts";
 
 const PANEL_TITLE = "Workspaces";
-/** Queued actions expire so a stale id cannot resurrect an ancient selection. */
-const PENDING_TTL_MS = 5 * 60 * 1000;
-const PENDING_LIMIT = 25;
-
-interface PendingAction {
-	action: PanelAction;
-	createdAt: number;
-}
-
-const pendingActions = new Map<string, PendingAction>();
-let pendingCounter = 0;
-
-function queuePending(action: PanelAction): string {
-	const now = Date.now();
-	for (const [id, entry] of pendingActions) {
-		if (now - entry.createdAt > PENDING_TTL_MS) pendingActions.delete(id);
-	}
-	while (pendingActions.size >= PENDING_LIMIT) {
-		const oldest = pendingActions.keys().next().value;
-		if (oldest === undefined) break;
-		pendingActions.delete(oldest);
-	}
-	const id = `ws-${now.toString(36)}-${(pendingCounter += 1).toString(36)}`;
-	pendingActions.set(id, { action, createdAt: now });
-	return id;
-}
 
 function panelWidth(): number {
 	const columns = process.stdout.columns ?? 100;
@@ -154,21 +124,6 @@ export default function workspacesExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// Hand-off target for the shortcut path, which has no switchSession().
-	pi.registerCommand("ws-resume", {
-		description: "Apply a queued workspace selection from the Ctrl+Shift+S panel",
-		handler: async (args, ctx) => {
-			const id = args.trim();
-			const queued = pendingActions.get(id);
-			if (!queued) {
-				ctx.ui.notify("That workspace selection is no longer available", "warning");
-				return;
-			}
-			pendingActions.delete(id);
-			await performAction(ctx, queued.action);
-		},
-	});
-
 	pi.registerShortcut(Key.ctrlShift("s"), {
 		description: "Open the workspaces sidebar",
 		handler: async (ctx) => {
@@ -177,11 +132,8 @@ export default function workspacesExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify(`${PANEL_TITLE}: wait for the current turn to finish`, "warning");
 				return;
 			}
-			const action = await openPanel(ctx);
-			if (!action || action.type === "cancel") return;
-			// sendUserMessage with expandPromptTemplates runs /ws-resume with a
-			// command context, so the selection applies without a second Enter.
-			pi.sendUserMessage(`/ws-resume ${queuePending(action)}`, { expandPromptTemplates: true });
+			// Let /ws own the panel and selection using a command context.
+			pi.sendUserMessage("/ws", { expandPromptTemplates: true });
 		},
 	});
 }

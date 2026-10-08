@@ -12,7 +12,7 @@ Open the panel with `/ws` or `Ctrl+Shift+S`.
 
 ## Features
 
-- Browse sessions grouped by workspace
+- Browse sessions grouped by workspace, showing the five newest sessions initially; click or select **View 5 more sessions** to reveal the next batch
 - Switch to an existing session
 - Create a new session in a selected workspace
 - Attach an existing directory by path without creating a session or modifying its files (`a`)

@@ -53,7 +53,8 @@ interface Seg {
 
 type Entry =
 	| { kind: "workspace"; workspace: WorkspaceRow; expanded: boolean }
-	| { kind: "session"; workspace: WorkspaceRow; session: SessionRow; matchSnippet?: string };
+	| { kind: "session"; workspace: WorkspaceRow; session: SessionRow; matchSnippet?: string }
+	| { kind: "more"; workspace: WorkspaceRow; showing: number; total: number };
 
 type FolderRow =
 	| { kind: "create"; path: string }
@@ -67,6 +68,7 @@ const MIN_BODY_ROWS = 6;
 const MAX_BODY_ROWS = 18;
 /** Lines the panel spends on chrome (borders, separators, filter, hints). */
 const CHROME_ROWS = 8;
+const SESSION_PAGE_SIZE = 5;
 
 export class WorkspacePanel implements Component {
 	private readonly theme: Theme;
@@ -82,6 +84,7 @@ export class WorkspacePanel implements Component {
 	private hiddenWorkspaces: Set<string>;
 	private showingHidden = false;
 	private expanded = new Set<string>();
+	private visibleSessions = new Map<string, number>();
 	private filter: string;
 	private regexMode = false;
 	private regexError?: string;
@@ -274,6 +277,15 @@ export class WorkspacePanel implements Component {
 			return this.paint(this.withRight(segs, right, innerW), innerW, selected);
 		}
 
+		if (entry.kind === "more") {
+			const remaining = entry.total - entry.showing;
+			const count = Math.min(SESSION_PAGE_SIZE, remaining);
+			return this.paint([
+				{ text: "      ↓ ", color: "accent" },
+				{ text: `View ${count} more session${count === 1 ? "" : "s"}…`, color: "accent", bold: true },
+			], innerW, selected);
+		}
+
 		const session = entry.session;
 		const meta = `${relativeTime(session.modified)} · ${session.messageCount}`;
 		const title = entry.matchSnippet ? `${session.title} · ${entry.matchSnippet}` : session.title;
@@ -418,7 +430,15 @@ export class WorkspacePanel implements Component {
 			// A search forces every surviving workspace open so hits are never hidden.
 			const expanded = query ? true : this.expanded.has(workspace.cwd);
 			out.push({ kind: "workspace", workspace, expanded });
-			if (expanded) out.push(...sessions);
+			if (expanded) {
+				if (query) {
+					out.push(...sessions);
+				} else {
+					const showing = Math.min(this.visibleSessions.get(workspace.cwd) ?? SESSION_PAGE_SIZE, sessions.length);
+					out.push(...sessions.slice(0, showing));
+					if (showing < sessions.length) out.push({ kind: "more", workspace, showing, total: sessions.length });
+				}
+			}
 		}
 		return out;
 	}
@@ -500,7 +520,7 @@ export class WorkspacePanel implements Component {
 				} else {
 					this.selected = index;
 					this.manualScroll = false;
-					if (event.clickCount && event.clickCount > 1) this.activate();
+					if (entries[index]?.kind === "more" || (event.clickCount && event.clickCount > 1)) this.activate();
 				}
 			} else {
 				return undefined;
@@ -699,6 +719,12 @@ export class WorkspacePanel implements Component {
 		if (entry.kind === "workspace") {
 			if (this.expanded.has(entry.workspace.cwd)) this.expanded.delete(entry.workspace.cwd);
 			else this.expanded.add(entry.workspace.cwd);
+			this.clampSelection();
+			this.tui.requestRender();
+			return;
+		}
+		if (entry.kind === "more") {
+			this.visibleSessions.set(entry.workspace.cwd, Math.min(entry.showing + SESSION_PAGE_SIZE, entry.total));
 			this.clampSelection();
 			this.tui.requestRender();
 			return;

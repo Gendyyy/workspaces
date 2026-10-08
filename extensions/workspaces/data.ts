@@ -91,6 +91,7 @@ export function canonicalPath(path: string | undefined): string | undefined {
 }
 
 const HIDDEN_WORKSPACES_PATH = join(HOME, ".pi", "agent", "workspaces-hidden.json");
+const ATTACHED_WORKSPACES_PATH = join(HOME, ".pi", "agent", "workspaces-attached.json");
 
 /** Read workspace paths hidden from the switcher; their sessions remain untouched. */
 export function loadHiddenWorkspaces(): Set<string> {
@@ -117,6 +118,45 @@ export function setWorkspaceHidden(cwd: string, hidden: boolean): { ok: boolean;
 	} catch (error) {
 		return { ok: false, error: error instanceof Error ? error.message : "Could not save hidden workspaces" };
 	}
+}
+
+/** Read directories explicitly attached to the workspace list. */
+export function loadAttachedWorkspaces(): string[] {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(ATTACHED_WORKSPACES_PATH, "utf-8"));
+		if (!Array.isArray(parsed)) return [];
+		return [...new Set(parsed.filter((path): path is string => typeof path === "string").map((path) => canonicalPath(path) ?? path))];
+	} catch {
+		return [];
+	}
+}
+
+/** Attach an existing directory to the list without creating a session or files in it. */
+export function attachWorkspacePath(input: string, currentCwd: string): { ok: boolean; path?: string; error?: string; alreadyAttached?: boolean } {
+	const trimmed = input.trim();
+	if (!trimmed) return { ok: false, error: "Enter a directory path" };
+	const expanded = expandHome(trimmed);
+	const target = resolve(isAbsolute(expanded) ? expanded : join(currentCwd || process.cwd(), expanded));
+	let canonical: string;
+	try {
+		if (!statSync(target).isDirectory()) return { ok: false, error: "That path is not a directory" };
+		canonical = realpathSync(target);
+	} catch {
+		return { ok: false, error: "Directory does not exist or cannot be accessed" };
+	}
+
+	const unhideResult = setWorkspaceHidden(canonical, false);
+	if (!unhideResult.ok) return { ok: false, error: unhideResult.error };
+	const attached = new Set(loadAttachedWorkspaces());
+	const alreadyAttached = attached.has(canonical);
+	attached.add(canonical);
+	try {
+		mkdirSync(dirname(ATTACHED_WORKSPACES_PATH), { recursive: true });
+		writeFileSync(ATTACHED_WORKSPACES_PATH, `${JSON.stringify([...attached].sort(), null, 2)}\n`);
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : "Could not save attached workspaces" };
+	}
+	return { ok: true, path: canonical, alreadyAttached };
 }
 
 /**
@@ -198,9 +238,14 @@ export async function loadWorkspaces(options: LoadOptions): Promise<WorkspaceRow
 		if (bucket) bucket.push(session);
 		else byCwd.set(cwd, [session]);
 	}
-	if (options.currentCwd && !byCwd.has(options.currentCwd)) {
-		byCwd.set(options.currentCwd, []);
-	}
+	const ensureWorkspace = (cwd: string) => {
+		const key = canonicalPath(cwd) ?? cwd;
+		if (![...byCwd.keys()].some((existing) => (canonicalPath(existing) ?? existing) === key)) {
+			byCwd.set(cwd, []);
+		}
+	};
+	if (options.currentCwd) ensureWorkspace(options.currentCwd);
+	for (const cwd of loadAttachedWorkspaces()) ensureWorkspace(cwd);
 
 	const currentFile = canonicalPath(options.currentSessionFile);
 	const workspaces: WorkspaceRow[] = [];

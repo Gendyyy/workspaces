@@ -24,7 +24,8 @@ import {
 export type PanelAction =
 	| { type: "cancel" }
 	| { type: "switch"; sessionPath: string }
-	| { type: "new-session"; cwd: string };
+	| { type: "new-session"; cwd: string }
+	| { type: "attach-workspace" };
 
 export interface PanelDeps {
 	theme: Theme;
@@ -598,6 +599,9 @@ export class WorkspacePanel implements Component {
 				case "n":
 					this.startNewSession();
 					return;
+				case "a":
+					this.done({ type: "attach-workspace" });
+					return;
 				case "o":
 					this.openFolderBrowser();
 					return;
@@ -928,10 +932,10 @@ export class WorkspacePanel implements Component {
 }
 
 const LIST_HINTS = [
-	"↑↓/wheel · ⏎ open · / search · ^R regex · s sort · n new · x hide · h hidden · r/d · esc",
-	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · x hide · h hidden · r/d · esc",
-	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · x/h · r/d · esc",
-	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · x/h · esc",
+	"↑↓/wheel · ⏎ open · / search · ^R regex · s sort · n session · a attach · o browse · x hide · h hidden · r rename · d delete",
+	"↑↓/wheel · ⏎ open · s sort · n session · a attach · o browse · x hide · h hidden · r/d",
+	"↑↓/wheel · ⏎ open · n session · a attach · x/h · r/d · esc",
+	"↑↓ · open · n session · a attach · x/h · esc",
 ] as const;
 const RENAME_HINTS = ["⏎ save · esc cancel", "⏎ save · esc"] as const;
 const FOLDER_HINTS = [

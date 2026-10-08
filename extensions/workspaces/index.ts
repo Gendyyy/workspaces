@@ -14,6 +14,7 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@e
 import { Key } from "@earendil-works/pi-tui";
 import {
 	abbreviatePath,
+	attachWorkspacePath,
 	createNewSessionFile,
 	loadHiddenWorkspaces,
 	deleteSession,
@@ -111,7 +112,21 @@ async function runCommand(ctx: ExtensionCommandContext, initialFilter?: string):
 	if (!requireTui(ctx)) return;
 	// Show the panel immediately, even if an agent turn is streaming. Any action
 	// that changes sessions waits for idle in performAction().
-	const action = await openPanel(ctx, initialFilter);
+	let action = await openPanel(ctx, initialFilter);
+	while (action?.type === "attach-workspace") {
+		const path = await ctx.ui.input("Attach workspace", "Absolute, ~, or current-directory-relative path");
+		if (path === undefined) return;
+		const result = attachWorkspacePath(path, ctx.cwd);
+		if (!result.ok) {
+			ctx.ui.notify(result.error ?? "Could not attach workspace", "error");
+		} else {
+			ctx.ui.notify(
+				result.alreadyAttached ? "Workspace is already attached" : `Attached ${abbreviatePath(result.path ?? path)}`,
+				"info",
+			);
+		}
+		action = await openPanel(ctx, initialFilter);
+	}
 	await performAction(ctx, action);
 }
 

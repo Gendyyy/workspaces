@@ -6,10 +6,10 @@
  * renaming, deleting, and creating session files.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { SessionManager, type SessionInfo } from "@earendil-works/pi-coding-agent";
 
 export interface SessionRow {
@@ -87,6 +87,35 @@ export function canonicalPath(path: string | undefined): string | undefined {
 		// Not on disk (yet): still normalize spelling so trailing slashes and
 		// `..` segments cannot make two identical paths compare unequal.
 		return resolve(path);
+	}
+}
+
+const HIDDEN_WORKSPACES_PATH = join(HOME, ".pi", "agent", "workspaces-hidden.json");
+
+/** Read workspace paths hidden from the switcher; their sessions remain untouched. */
+export function loadHiddenWorkspaces(): Set<string> {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(HIDDEN_WORKSPACES_PATH, "utf-8"));
+		if (!Array.isArray(parsed)) return new Set();
+		return new Set(parsed.filter((path): path is string => typeof path === "string").map((path) => canonicalPath(path) ?? path));
+	} catch {
+		return new Set();
+	}
+}
+
+/** Persist whether a workspace is hidden from the switcher without touching its sessions. */
+export function setWorkspaceHidden(cwd: string, hidden: boolean): { ok: boolean; error?: string } {
+	const key = canonicalPath(cwd);
+	if (!key) return { ok: false, error: "Workspace path is unavailable" };
+	const hiddenWorkspaces = loadHiddenWorkspaces();
+	if (hidden) hiddenWorkspaces.add(key);
+	else hiddenWorkspaces.delete(key);
+	try {
+		mkdirSync(dirname(HIDDEN_WORKSPACES_PATH), { recursive: true });
+		writeFileSync(HIDDEN_WORKSPACES_PATH, `${JSON.stringify([...hiddenWorkspaces].sort(), null, 2)}\n`);
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : "Could not save hidden workspaces" };
 	}
 }
 

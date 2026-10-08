@@ -19,11 +19,13 @@ import { Key } from "@earendil-works/pi-tui";
 import {
 	abbreviatePath,
 	createNewSessionFile,
+	loadHiddenWorkspaces,
 	deleteSession,
 	loadWorkspaces,
 	removeEmptySessionFile,
 	renameSession,
 	sessionsRootFor,
+	setWorkspaceHidden,
 } from "./data.ts";
 import { WorkspacePanel, type PanelAction } from "./panel.ts";
 
@@ -86,9 +88,11 @@ async function openPanel(ctx: ExtensionContext, initialFilter?: string): Promise
 				tui,
 				currentCwd: ctx.cwd,
 				workspaces,
+				hiddenWorkspaces: loadHiddenWorkspaces(),
 				reload: load,
 				rename: renameSession,
 				remove: deleteSession,
+				setWorkspaceHidden,
 				done,
 				initialFilter,
 			}),

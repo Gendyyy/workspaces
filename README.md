@@ -17,5 +17,6 @@ Open the panel with `/ws` or `Ctrl+Shift+S`.
 - Create a new session in a selected workspace
 - Rename or delete sessions
 - Search/filter the workspace list
+- Hide workspaces from the list without deleting sessions (`x`); press `h` to view hidden workspaces and `x` to restore one
 
 This package uses Pi's host-provided `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` APIs.

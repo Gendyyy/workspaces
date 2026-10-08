@@ -11,6 +11,7 @@ import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth, type Component, type TUI, type TuiMouseEvent } from "@earendil-works/pi-tui";
 import {
 	abbreviatePath,
+	canonicalPath,
 	expandHome,
 	listDirectories,
 	parentDirectory,
@@ -36,6 +37,9 @@ export interface PanelDeps {
 	rename: (sessionPath: string, name: string) => { ok: boolean; error?: string };
 	/** Delete a session file; returns an error message on failure. */
 	remove: (sessionPath: string) => Promise<{ ok: boolean; method?: string; error?: string }>;
+	hiddenWorkspaces: Set<string>;
+	/** Persist a workspace's visibility without changing its sessions. */
+	setWorkspaceHidden: (cwd: string, hidden: boolean) => { ok: boolean; error?: string };
 	done: (action: PanelAction) => void;
 	initialFilter?: string;
 }
@@ -70,9 +74,12 @@ export class WorkspacePanel implements Component {
 	private readonly reload: () => Promise<WorkspaceRow[]>;
 	private readonly rename: PanelDeps["rename"];
 	private readonly remove: PanelDeps["remove"];
+	private readonly setWorkspaceHidden: PanelDeps["setWorkspaceHidden"];
 	private readonly done: PanelDeps["done"];
 
 	private workspaces: WorkspaceRow[];
+	private hiddenWorkspaces: Set<string>;
+	private showingHidden = false;
 	private expanded = new Set<string>();
 	private filter: string;
 	private regexMode = false;
@@ -110,6 +117,8 @@ export class WorkspacePanel implements Component {
 		this.reload = deps.reload;
 		this.rename = deps.rename;
 		this.remove = deps.remove;
+		this.hiddenWorkspaces = new Set(deps.hiddenWorkspaces);
+		this.setWorkspaceHidden = deps.setWorkspaceHidden;
 		this.done = deps.done;
 		this.filter = deps.initialFilter ?? "";
 		this.searching = this.filter.length > 0;
@@ -141,7 +150,7 @@ export class WorkspacePanel implements Component {
 		lines.push(...this.renderListBody(innerW, bodyRows));
 		lines.push(this.separator(innerW));
 		lines.push(this.renderHints(innerW, this.mode === "rename" ? RENAME_HINTS : LIST_HINTS));
-		return this.box(lines, width, `Workspaces · ${this.sortMode}`);
+		return this.box(lines, width, `Workspaces${this.showingHidden ? " · hidden" : ""} · ${this.sortMode}`);
 	}
 
 	private bodyRows(): number {
@@ -375,7 +384,10 @@ export class WorkspacePanel implements Component {
 		const regex = this.compileRegex(query);
 		const invalidRegex = this.regexMode && query.length > 0 && !regex;
 		const date = (session: SessionRow) => (this.sortMode === "modified" ? session.modified : session.created).getTime();
-		const workspaces = [...this.workspaces].sort((a, b) => {
+		const workspaces = this.workspaces.filter((workspace) => {
+			const key = canonicalPath(workspace.cwd) ?? workspace.cwd;
+			return this.hiddenWorkspaces.has(key) === this.showingHidden;
+		}).sort((a, b) => {
 			if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
 			const newest = (workspace: WorkspaceRow) =>
 				workspace.sessions.reduce((latest, session) => Math.max(latest, date(session)), 0);
@@ -595,6 +607,19 @@ export class WorkspacePanel implements Component {
 				case "d":
 					this.startDelete();
 					return;
+				case "x":
+					this.toggleWorkspaceVisibility();
+					return;
+				case "h":
+					this.showingHidden = !this.showingHidden;
+					this.filter = "";
+					this.searching = false;
+					this.selected = 0;
+					this.scroll = 0;
+					this.manualScroll = false;
+					this.notice = { text: this.showingHidden ? "Hidden workspaces · x restores" : "Showing active workspaces", tone: "info" };
+					this.tui.requestRender();
+					return;
 				case "s":
 					this.sortMode = this.sortMode === "modified" ? "created" : "modified";
 					this.selected = 0;
@@ -690,6 +715,28 @@ export class WorkspacePanel implements Component {
 
 	private workspaceFor(entry: Entry | undefined): WorkspaceRow | undefined {
 		return entry?.workspace;
+	}
+
+	private toggleWorkspaceVisibility(): void {
+		const entry = this.selectedEntry();
+		if (!entry || entry.kind !== "workspace") {
+			this.notice = { text: "Select a workspace row first", tone: "error" };
+			this.tui.requestRender();
+			return;
+		}
+		const key = canonicalPath(entry.workspace.cwd) ?? entry.workspace.cwd;
+		const hide = !this.hiddenWorkspaces.has(key);
+		const result = this.setWorkspaceHidden(entry.workspace.cwd, hide);
+		if (!result.ok) {
+			this.notice = { text: result.error ?? "Could not update workspace list", tone: "error" };
+			this.tui.requestRender();
+			return;
+		}
+		if (hide) this.hiddenWorkspaces.add(key);
+		else this.hiddenWorkspaces.delete(key);
+		this.notice = { text: hide ? "Removed from list; sessions are kept (h to restore)" : "Workspace restored to list", tone: "info" };
+		this.clampSelection();
+		this.tui.requestRender();
 	}
 
 	private startNewSession(): void {
@@ -881,10 +928,10 @@ export class WorkspacePanel implements Component {
 }
 
 const LIST_HINTS = [
-	"↑↓/wheel · ⏎ open · / search · ^R regex · s sort · n new · o · r/d · esc",
-	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · o · r/d · esc",
-	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · esc",
-	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · esc",
+	"↑↓/wheel · ⏎ open · / search · ^R regex · s sort · n new · x hide · h hidden · r/d · esc",
+	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · x hide · h hidden · r/d · esc",
+	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · x/h · r/d · esc",
+	"↑↓/wheel · ⏎ open · ^R regex · s sort · n new · x/h · esc",
 ] as const;
 const RENAME_HINTS = ["⏎ save · esc cancel", "⏎ save · esc"] as const;
 const FOLDER_HINTS = [

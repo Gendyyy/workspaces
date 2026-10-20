@@ -24,7 +24,7 @@ import {
 	sessionsRootFor,
 	setWorkspaceHidden,
 } from "./data.ts";
-import { WorkspacePanel, type PanelAction } from "./panel.ts";
+import { WorkspacePanel, type PanelAction } from "./panel/index.ts";
 
 const PANEL_TITLE = "Workspaces";
 
@@ -82,6 +82,8 @@ async function openPanel(ctx: ExtensionContext, initialFilter?: string): Promise
 /** Execute an action. Only callable from a command context. */
 async function performAction(ctx: ExtensionCommandContext, action: PanelAction | undefined): Promise<void> {
 	if (!action || action.type === "cancel") return;
+	// Attach runs in runCommand(), where the path picker lives.
+	if (action.type === "attach-workspace") return;
 	await ctx.waitForIdle();
 
 	if (action.type === "new-session") {

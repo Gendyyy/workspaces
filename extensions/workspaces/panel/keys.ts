@@ -31,6 +31,8 @@ export function listKeyAction(data: string, singleKey: boolean): HitAction | und
 			return { type: "focus-search" };
 		case "n":
 			return { type: "new-session" };
+		case "m":
+			return { type: "move" };
 		case "a":
 			return { type: "attach" };
 		case "o":
@@ -53,13 +55,13 @@ export function listKeyAction(data: string, singleKey: boolean): HitAction | und
 }
 
 /** Map a folder-browser keypress. Typed text is handled by the caller. */
-export function folderKeyAction(data: string): HitAction | undefined {
+export function folderKeyAction(data: string, moving = false): HitAction | undefined {
 	if (matchesKey(data, Key.up)) return { type: "move-folder-selection", delta: -1 };
 	if (matchesKey(data, Key.down)) return { type: "move-folder-selection", delta: 1 };
 	if (matchesKey(data, Key.pageUp)) return { type: "move-folder-selection", delta: -5 };
 	if (matchesKey(data, Key.pageDown)) return { type: "move-folder-selection", delta: 5 };
 	if (matchesKey(data, Key.enter) || matchesKey(data, Key.return)) return { type: "activate-folder" };
-	if (matchesKey(data, Key.tab)) return { type: "folder-create" };
+	if (matchesKey(data, Key.tab)) return moving ? { type: "folder-move" } : { type: "folder-create" };
 	return undefined;
 }
 

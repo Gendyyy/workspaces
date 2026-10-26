@@ -19,6 +19,7 @@ import {
 	loadHiddenWorkspaces,
 	deleteSession,
 	loadWorkspaces,
+	moveSessionToDirectory,
 	removeEmptySessionFile,
 	renameSession,
 	sessionsRootFor,
@@ -86,6 +87,33 @@ async function performAction(ctx: ExtensionCommandContext, action: PanelAction |
 	if (action.type === "attach-workspace") return;
 	await ctx.waitForIdle();
 
+	if (action.type === "move-session") {
+		const activeSessionDir = ctx.sessionManager.getSessionDir();
+		const sessionsDir = sessionsRootFor(activeSessionDir, ctx.cwd);
+		const moved = moveSessionToDirectory(action.sessionPath, action.targetCwd, sessionsDir, activeSessionDir);
+		if (!moved.ok || !moved.path) {
+			ctx.ui.notify(moved.error ?? "Could not move session", "error");
+			return;
+		}
+		if (!action.isCurrent) {
+			ctx.ui.notify(`Moved session to ${abbreviatePath(action.targetCwd)}`, "info");
+			return;
+		}
+		const switched = await ctx.switchSession(moved.path, {
+			withSession: async (next) => {
+				next.ui.notify(`Moved session to ${abbreviatePath(action.targetCwd)}`, "info");
+			},
+		});
+		if (switched.cancelled) {
+			const restored = moveSessionToDirectory(moved.path, ctx.cwd, sessionsDir, activeSessionDir);
+			ctx.ui.notify(
+				restored.ok ? "Move cancelled; session restored" : `Switch cancelled; session remains at ${moved.path}`,
+				restored.ok ? "info" : "error",
+			);
+		}
+		return;
+	}
+
 	if (action.type === "new-session") {
 		const cwd = action.cwd || ctx.cwd;
 		const created = createNewSessionFile(cwd, sessionsRootFor(ctx.sessionManager.getSessionDir(), ctx.cwd));
@@ -134,7 +162,7 @@ async function runCommand(ctx: ExtensionCommandContext, initialFilter?: string):
 
 export default function workspacesExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("ws", {
-		description: "Open the workspaces sidebar: switch, create, rename, or delete sessions",
+		description: "Open the workspaces sidebar: switch, create, move, rename, or delete sessions",
 		handler: async (args, ctx) => {
 			const filter = args.trim();
 			await runCommand(ctx, filter.length > 0 ? filter : undefined);

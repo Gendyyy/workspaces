@@ -8,6 +8,7 @@ export type PanelAction =
 	| { type: "cancel" }
 	| { type: "switch"; sessionPath: string }
 	| { type: "new-session"; cwd: string }
+	| { type: "move-session"; sessionPath: string; targetCwd: string; isCurrent: boolean }
 	| { type: "attach-workspace" };
 
 /** A user intention. Keys, rows, and buttons all produce these. */
@@ -17,6 +18,7 @@ export type HitAction =
 	| { type: "move-folder-selection"; delta: number }
 	| { type: "expand-selected"; expanded: boolean }
 	| { type: "new-session" }
+	| { type: "move" }
 	| { type: "attach" }
 	| { type: "browse" }
 	| { type: "hide-workspace" }
@@ -33,6 +35,7 @@ export type HitAction =
 	| { type: "confirm-delete" }
 	| { type: "folder-open"; path: string }
 	| { type: "folder-create" }
+	| { type: "folder-move" }
 	| { type: "folder-back" }
 	| { type: "activate-folder" };
 
@@ -47,6 +50,7 @@ const LIST_HINT_ROWS: readonly (readonly HintButton[])[] = [
 		{ label: "⏎ open", action: { type: "activate" } },
 		{ label: "/ find", action: { type: "focus-search" } },
 		{ label: "n new", action: { type: "new-session" } },
+		{ label: "m move", action: { type: "move" } },
 		{ label: "a add", action: { type: "attach" } },
 		{ label: "o dirs", action: { type: "browse" } },
 		{ label: "esc close", action: { type: "close" } },
@@ -83,10 +87,19 @@ const FOLDER_HINT_ROWS: readonly (readonly HintButton[])[] = [
 	],
 ];
 
+const MOVE_FOLDER_HINT_ROWS: readonly (readonly HintButton[])[] = [
+	[
+		{ label: "⏎ open", action: { type: "activate-folder" } },
+		{ label: "tab move", action: { type: "folder-move" } },
+		{ label: "esc back", action: { type: "folder-back" } },
+	],
+];
+
 /** Pick the hint rows for the current mode. */
-export function hintRowsFor(mode: "list" | "rename" | "confirm-delete" | "folder"): readonly (readonly HintButton[])[] {
+export function hintRowsFor(mode: "list" | "rename" | "confirm-delete" | "folder" | "move-folder"): readonly (readonly HintButton[])[] {
 	if (mode === "rename") return RENAME_HINT_ROWS;
 	if (mode === "confirm-delete") return DELETE_HINT_ROWS;
+	if (mode === "move-folder") return MOVE_FOLDER_HINT_ROWS;
 	if (mode === "folder") return FOLDER_HINT_ROWS;
 	return LIST_HINT_ROWS;
 }

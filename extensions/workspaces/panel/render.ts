@@ -12,6 +12,7 @@ import { SESSION_PAGE_SIZE, type Entry, type SortMode } from "./state.ts";
 /** Session index under the cursor, as rows are painted. */
 export type FolderRow =
 	| { kind: "create"; path: string }
+	| { kind: "move"; path: string }
 	| { kind: "jump"; path: string }
 	| { kind: "parent"; path: string }
 	| { kind: "dir"; entry: DirectoryEntry };
@@ -34,6 +35,7 @@ export interface ListView {
 }
 
 export interface FolderView {
+	purpose: "new-session" | "move-session";
 	folderPath: string;
 	folderFilter: string;
 	folderRows: FolderRow[];
@@ -60,8 +62,8 @@ export function listHeader(view: ListView): Seg[] {
 }
 
 /** Header controls for the folder browser. */
-export function folderHeaderSegs(): Seg[] {
-	return [{ text: " ", color: "border" }, { text: "New session", color: "accent", bold: true }];
+export function folderHeaderSegs(title = "New session"): Seg[] {
+	return [{ text: " ", color: "border" }, { text: title, color: "accent", bold: true }];
 }
 
 /** The always-present close control on the right of the header. */
@@ -136,7 +138,7 @@ function promptLine(view: ListView, innerW: number): LayoutLine {
 function footerLines(
 	innerW: number,
 	notice: ListView["notice"],
-	mode: "list" | "rename" | "confirm-delete" | "folder",
+	mode: "list" | "rename" | "confirm-delete" | "folder" | "move-folder",
 ): LayoutLine[] {
 	if (notice) {
 		return [
@@ -261,11 +263,13 @@ function folderPathLine(view: FolderView, innerW: number): LayoutLine {
 
 /** Draw one folder row; only the create row's check mark is clickable. */
 function folderLine(row: FolderRow, selected: boolean, rowIndex: number): LayoutLine {
-	if (row.kind === "create") {
+	if (row.kind === "create" || row.kind === "move") {
+		const action = row.kind === "move" ? { type: "folder-move" as const } : { type: "folder-create" as const };
+		const label = row.kind === "move" ? "Move session here" : "Start a session in this folder";
 		return {
 			segs: [
-				{ text: " ✓ ", color: "success", hit: { type: "folder-create" } },
-				{ text: "Start a session in this folder", color: "success", bold: true },
+				{ text: " ✓ ", color: "success", hit: action },
+				{ text: label, color: "success", bold: true },
 			],
 			selected,
 			rowIndex,
@@ -314,6 +318,6 @@ export function renderFolder(view: FolderView, innerW: number): LayoutLine[] {
 		);
 	}
 	lines.push({ segs: [{ text: "─".repeat(innerW), color: "borderMuted" }] });
-	lines.push(...footerLines(innerW, view.notice, "folder"));
+	lines.push(...footerLines(innerW, view.notice, view.purpose === "move-session" ? "move-folder" : "folder"));
 	return lines;
 }

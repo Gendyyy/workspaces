@@ -8,19 +8,19 @@ import { deleteKeyAction, folderKeyAction, listKeyAction, renameKeyAction } from
 import { PanelHarness } from "./harness.ts";
 
 /** Flatten a mode's hint rows into one button list. */
-function buttons(mode: "list" | "rename" | "confirm-delete" | "folder") {
+function buttons(mode: "list" | "rename" | "confirm-delete" | "folder" | "move-folder") {
 	return hintRowsFor(mode).flat();
 }
 
 describe("hint buttons", () => {
 	test("every button carries an action", () => {
-		for (const mode of ["list", "rename", "confirm-delete", "folder"] as const) {
+		for (const mode of ["list", "rename", "confirm-delete", "folder", "move-folder"] as const) {
 			for (const button of buttons(mode)) expect(button.action).toBeDefined();
 		}
 	});
 
 	test("labels are unique within a row", () => {
-		for (const mode of ["list", "rename", "confirm-delete", "folder"] as const) {
+		for (const mode of ["list", "rename", "confirm-delete", "folder", "move-folder"] as const) {
 			for (const row of hintRowsFor(mode)) {
 				const labels = row.map((button) => button.label);
 				expect(new Set(labels).size).toBe(labels.length);
@@ -34,6 +34,7 @@ describe("keyboard parity", () => {
 		["\r", "activate"],
 		["/", "focus-search"],
 		["n", "new-session"],
+		["m", "move"],
 		["a", "attach"],
 		["o", "browse"],
 		["s", "toggle-sort"],
@@ -69,6 +70,11 @@ describe("keyboard parity", () => {
 		}
 	});
 
+	test("move folder confirmation matches tab", () => {
+		const folder = buttons("move-folder");
+		expect(folderKeyAction("\t", true)).toEqual(expectedAction(folder, "folder-move"));
+	});
+
 	test("rename buttons match rename keys", () => {
 		expect(renameKeyAction("\r")).toEqual(expectedAction(buttons("rename"), "save-rename"));
 	});
@@ -88,6 +94,23 @@ function expectedAction(list: ReturnType<typeof buttons>, type: string): HitActi
 }
 
 describe("modal flows", () => {
+	test("m opens a destination browser and tab selects the current folder", () => {
+		const h = new PanelHarness();
+		h.render();
+		h.key("\x1b[B");
+		h.key("m");
+		const folder = h.render().join("\n");
+		expect(folder).toContain("Move session");
+		expect(folder).toContain("Move session here");
+		h.key("\t");
+		expect(h.actions).toEqual([{
+			type: "move-session",
+			sessionPath: "/tmp/sessions/Alpha session 7.jsonl",
+			targetCwd: "/tmp",
+			isCurrent: false,
+		}]);
+	});
+
 	test("rename saves the edited title through the save button", () => {
 		const h = new PanelHarness();
 		h.render();

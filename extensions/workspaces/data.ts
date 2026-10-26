@@ -6,10 +6,11 @@
  * renaming, deleting, and creating session files.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { SessionManager, type SessionInfo } from "@earendil-works/pi-coding-agent";
 
 export interface SessionRow {
@@ -204,9 +205,91 @@ function encodedCwdDirName(cwd: string): string {
  */
 export function sessionsRootFor(sessionDir: string | undefined, cwd: string): string | undefined {
 	if (!sessionDir) return undefined;
-	return sessionDir === encodedCwdDirName(cwd) || sessionDir.endsWith(`/sessions/${encodedCwdDirName(cwd)}`)
+	const normalized = sessionDir.replace(/[\\/]+/g, "/");
+	return sessionDir === encodedCwdDirName(cwd) || normalized.endsWith(`/sessions/${encodedCwdDirName(cwd)}`)
 		? undefined
 		: sessionDir;
+}
+
+/** Move a session to another workspace while retaining its id and full history. */
+export function moveSessionToDirectory(
+	sessionPath: string,
+	targetCwd: string,
+	sessionsRoot?: string,
+	activeSessionDir?: string,
+): { ok: boolean; path?: string; error?: string } {
+	try {
+		if (!existsSync(sessionPath)) return { ok: false, error: "Session file not found" };
+		const targetStat = statSync(targetCwd);
+		if (!targetStat.isDirectory()) return { ok: false, error: "Target is not a directory" };
+		const canonicalTarget = realpathSync(targetCwd);
+		const sourceStat = statSync(sessionPath);
+		const source = readFileSync(sessionPath);
+		const newline = source.indexOf(0x0a);
+		const rawHeaderEnd = newline < 0 ? source.length : newline;
+		const hasCarriageReturn = rawHeaderEnd > 0 && source[rawHeaderEnd - 1] === 0x0d;
+		const headerEnd = hasCarriageReturn ? rawHeaderEnd - 1 : rawHeaderEnd;
+		const header = JSON.parse(source.subarray(0, headerEnd).toString("utf8")) as Record<string, unknown>;
+		if (header.type !== "session" || typeof header.id !== "string") {
+			return { ok: false, error: "Invalid session header" };
+		}
+		if (canonicalPath(typeof header.cwd === "string" ? header.cwd : undefined) === canonicalTarget) {
+			return { ok: false, error: "Session is already in that directory" };
+		}
+		const ending = newline < 0 ? "" : hasCarriageReturn ? "\r\n" : "\n";
+		const bodyStart = newline < 0 ? source.length : newline + 1;
+		const moved = Buffer.concat([
+			Buffer.from(`${JSON.stringify({ ...header, cwd: canonicalTarget })}${ending}`, "utf8"),
+			source.subarray(bodyStart),
+		]);
+
+		// A custom session root is flat and shared across workspaces; only its header changes.
+		if (sessionsRoot) {
+			const tempPath = join(dirname(sessionPath), `.move-${randomUUID()}.tmp`);
+			try {
+				writeFileSync(tempPath, moved, { flag: "wx", mode: sourceStat.mode });
+				renameSync(tempPath, sessionPath);
+			} finally {
+				if (existsSync(tempPath)) unlinkSync(tempPath);
+			}
+			return { ok: true, path: sessionPath };
+		}
+
+		const defaultRoot = activeSessionDir ? dirname(activeSessionDir) : join(HOME, ".pi", "agent", "sessions");
+		const targetDir = join(defaultRoot, encodedCwdDirName(canonicalTarget));
+		mkdirSync(targetDir, { recursive: true });
+		const sourceDir = realpathSync(dirname(sessionPath));
+		if (sourceDir === realpathSync(targetDir)) {
+			const tempPath = join(targetDir, `.move-${randomUUID()}.tmp`);
+			try {
+				writeFileSync(tempPath, moved, { flag: "wx", mode: sourceStat.mode });
+				renameSync(tempPath, sessionPath);
+			} finally {
+				if (existsSync(tempPath)) unlinkSync(tempPath);
+			}
+			return { ok: true, path: sessionPath };
+		}
+
+		const originalName = basename(sessionPath);
+		const extension = originalName.endsWith(".jsonl") ? ".jsonl" : "";
+		const stem = extension ? originalName.slice(0, -extension.length) : originalName;
+		let destination = join(targetDir, originalName);
+		let suffix = 1;
+		while (existsSync(destination)) {
+			destination = join(targetDir, `${stem}-${header.id.slice(0, 8)}${suffix === 1 ? "" : `-${suffix}`}${extension}`);
+			suffix += 1;
+		}
+		writeFileSync(destination, moved, { flag: "wx", mode: sourceStat.mode });
+		try {
+			unlinkSync(sessionPath);
+		} catch (error) {
+			try { unlinkSync(destination); } catch { /* preserve the original error */ }
+			throw error;
+		}
+		return { ok: true, path: destination };
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 export interface LoadOptions {

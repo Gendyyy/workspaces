@@ -57,6 +57,7 @@ export interface PanelDeps {
 }
 
 type Mode = "list" | "rename" | "confirm-delete" | "folder";
+type FolderPurpose = "new-session" | "move-session";
 
 /** Modal workspace switcher overlay. */
 export class WorkspacePanel implements Component {
@@ -96,6 +97,8 @@ export class WorkspacePanel implements Component {
 	private deleteTarget?: SessionRow;
 
 	private folderPath: string;
+	private folderPurpose: FolderPurpose = "new-session";
+	private moveTarget?: SessionRow;
 	private folderRows: FolderRow[] = [];
 	private folderSelected = 0;
 	private folderScroll = 0;
@@ -142,6 +145,7 @@ export class WorkspacePanel implements Component {
 			);
 			this.folderScroll = start;
 			const view: FolderView = {
+				purpose: this.folderPurpose,
 				folderPath: this.folderPath,
 				folderFilter: this.folderFilter,
 				folderRows: this.folderRows,
@@ -151,7 +155,7 @@ export class WorkspacePanel implements Component {
 				notice: this.notice,
 			};
 			const box = composeBox({
-				left: folderHeaderSegs(),
+				left: folderHeaderSegs(this.folderPurpose === "move-session" ? "Move session" : "New session"),
 				right: closeControl(),
 				lines: renderFolder(view, innerW),
 				width,
@@ -369,7 +373,7 @@ export class WorkspacePanel implements Component {
 	}
 
 	private handleFolderInput(data: string): void {
-		const action = folderKeyAction(data);
+		const action = folderKeyAction(data, this.folderPurpose === "move-session");
 		if (action) {
 			this.perform(action);
 			return;
@@ -402,6 +406,7 @@ export class WorkspacePanel implements Component {
 		if (this.mode === "folder") {
 			this.mode = "list";
 			this.folderFilter = "";
+			this.moveTarget = undefined;
 			this.hover = undefined;
 			this.tui.requestRender();
 			return;
@@ -437,6 +442,9 @@ export class WorkspacePanel implements Component {
 				break;
 			case "new-session":
 				closed = this.startNewSession();
+				break;
+			case "move":
+				this.startMove();
 				break;
 			case "attach":
 				this.done({ type: "attach-workspace" });
@@ -491,9 +499,13 @@ export class WorkspacePanel implements Component {
 				this.done({ type: "new-session", cwd: this.folderPath });
 				closed = true;
 				break;
+			case "folder-move":
+				closed = this.moveFolder(this.folderPath);
+				break;
 			case "folder-back":
 				this.mode = "list";
 				this.folderFilter = "";
+				this.moveTarget = undefined;
 				break;
 			case "activate-folder":
 				this.activateFolder();
@@ -596,6 +608,17 @@ export class WorkspacePanel implements Component {
 		return true;
 	}
 
+	private startMove(): void {
+		const entry = this.selectedEntry();
+		if (!entry || entry.kind !== "session") return;
+		if (!entry.session.path) {
+			this.notice = { text: "That session has no file on disk yet", tone: "error" };
+			return;
+		}
+		this.moveTarget = entry.session;
+		this.openFolderBrowser("move-session");
+	}
+
 	private startRename(): void {
 		const entry = this.selectedEntry();
 		if (!entry || entry.kind !== "session") return;
@@ -650,6 +673,7 @@ export class WorkspacePanel implements Component {
 		if (this.mode === "folder") {
 			this.mode = "list";
 			this.folderFilter = "";
+			this.moveTarget = undefined;
 			return;
 		}
 		this.mode = "list";
@@ -659,9 +683,10 @@ export class WorkspacePanel implements Component {
 
 	// -------------------------------------------------------------- folder mode
 
-	private openFolderBrowser(): void {
+	private openFolderBrowser(purpose: FolderPurpose = "new-session"): void {
 		const workspace = this.workspaceFor(this.selectedEntry());
 		const start = workspace?.cwd && !workspace.missing ? workspace.cwd : this.currentCwd || expandHome("~");
+		this.folderPurpose = purpose;
 		this.folderPath = start;
 		this.folderFilter = "";
 		this.folderSelected = 0;
@@ -674,7 +699,7 @@ export class WorkspacePanel implements Component {
 		this.folderManualScroll = false;
 		this.folderScroll = 0;
 		const existing = listDirectories(this.folderPath);
-		const rows: FolderRow[] = [{ kind: "create", path: this.folderPath }];
+		const rows: FolderRow[] = [{ kind: this.folderPurpose === "move-session" ? "move" : "create", path: this.folderPath }];
 
 		const typed = expandHome(this.folderFilter.trim());
 		if (typed && typed !== this.folderPath && (typed.startsWith("/") || typed.startsWith("~"))) {
@@ -717,6 +742,9 @@ export class WorkspacePanel implements Component {
 			case "create":
 				this.done({ type: "new-session", cwd: row.path });
 				return;
+			case "move":
+				this.moveFolder(row.path);
+				return;
 			case "jump":
 			case "parent":
 				this.folderOpen(row.path);
@@ -725,6 +753,12 @@ export class WorkspacePanel implements Component {
 				this.folderOpen(row.entry.path);
 				return;
 		}
+	}
+
+	private moveFolder(targetCwd: string): boolean {
+		if (!this.moveTarget) return false;
+		this.done({ type: "move-session", sessionPath: this.moveTarget.path, targetCwd, isCurrent: this.moveTarget.isCurrent });
+		return true;
 	}
 
 	invalidate(): void {}

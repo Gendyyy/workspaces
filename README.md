@@ -15,6 +15,9 @@ Open the panel with `/ws` or `Ctrl+Shift+S`.
 - Browse sessions grouped by workspace, showing the five newest sessions initially; click or select **View 5 more sessions** to reveal the next batch
 - Switch to an existing session
 - Create a new session in a selected workspace
+- Move a session with `m`, then browse to the destination directory and press `Tab`
+
+Moving a parent session does not rewrite existing fork children’s `parentSession` paths; those lineage references may still point to the old file path.
 - Attach an existing directory by path without creating a session or modifying its files (`a`)
 - Rename or delete sessions
 - Search/filter the workspace list

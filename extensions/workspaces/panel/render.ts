@@ -12,7 +12,8 @@ import { SESSION_PAGE_SIZE, type Entry, type SortMode } from "./state.ts";
 /** Session index under the cursor, as rows are painted. */
 export type FolderRow =
 	| { kind: "create"; path: string }
-	| { kind: "move"; path: string }
+	| { kind: "workspace"; path: string; label: string }
+	| { kind: "custom"; path: string }
 	| { kind: "jump"; path: string }
 	| { kind: "parent"; path: string }
 	| { kind: "dir"; entry: DirectoryEntry };
@@ -243,6 +244,17 @@ export function renderList(view: ListView, innerW: number): LayoutLine[] {
 
 /** Folder browser path line. */
 function folderPathLine(view: FolderView, innerW: number): LayoutLine {
+	if (view.purpose === "move-session") {
+		const prompt = view.folderFilter ? `Path: ${view.folderFilter}` : "Type absolute path or choose workspace";
+		return {
+			segs: [
+				{ text: " " },
+				{ text: "⌕ ", color: "muted" },
+				{ text: truncateToWidth(prompt, Math.max(1, innerW - 4), "…") },
+				{ text: "▏", color: "dim" },
+			],
+		};
+	}
 	if (view.folderFilter) {
 		return {
 			segs: [
@@ -261,15 +273,27 @@ function folderPathLine(view: FolderView, innerW: number): LayoutLine {
 	};
 }
 
-/** Draw one folder row; only the create row's check mark is clickable. */
-function folderLine(row: FolderRow, selected: boolean, rowIndex: number): LayoutLine {
-	if (row.kind === "create" || row.kind === "move") {
-		const action = row.kind === "move" ? { type: "folder-move" as const } : { type: "folder-create" as const };
-		const label = row.kind === "move" ? "Move session here" : "Start a session in this folder";
+/** Draw one folder row and attach its pointer action. */
+function folderLine(row: FolderRow, selected: boolean, rowIndex: number, innerW: number): LayoutLine {
+	if (row.kind === "create") {
+		const action = { type: "folder-create" as const };
+		const label = "Start a session in this folder";
 		return {
 			segs: [
 				{ text: " ✓ ", color: "success", hit: action },
 				{ text: label, color: "success", bold: true },
+			],
+			selected,
+			rowIndex,
+		};
+	}
+	if (row.kind === "workspace" || row.kind === "custom") {
+		const action = { type: "folder-move" as const, path: row.path };
+		const label = row.kind === "workspace" ? `${row.label} · ${abbreviatePath(row.path)}` : `Use ${abbreviatePath(row.path)}`;
+		return {
+			segs: [
+				{ text: " → ", color: "accent", hit: action },
+				{ text: truncateToWidth(label, Math.max(1, innerW - 5), "…"), color: "text", hit: action },
 			],
 			selected,
 			rowIndex,
@@ -314,7 +338,7 @@ export function renderFolder(view: FolderView, innerW: number): LayoutLine[] {
 	for (let offset = 0; offset < view.bodyRows; offset += 1) {
 		const row = view.folderRows[view.folderStart + offset];
 		lines.push(
-			row ? folderLine(row, view.folderStart + offset === view.folderSelected, view.folderStart + offset) : emptyLine(),
+			row ? folderLine(row, view.folderStart + offset === view.folderSelected, view.folderStart + offset, innerW) : emptyLine(),
 		);
 	}
 	lines.push({ segs: [{ text: "─".repeat(innerW), color: "borderMuted" }] });

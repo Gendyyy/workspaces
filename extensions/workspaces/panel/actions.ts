@@ -35,7 +35,7 @@ export type HitAction =
 	| { type: "confirm-delete" }
 	| { type: "folder-open"; path: string }
 	| { type: "folder-create" }
-	| { type: "folder-move" }
+	| { type: "folder-move"; path?: string }
 	| { type: "folder-back" }
 	| { type: "activate-folder" };
 
@@ -89,7 +89,7 @@ const FOLDER_HINT_ROWS: readonly (readonly HintButton[])[] = [
 
 const MOVE_FOLDER_HINT_ROWS: readonly (readonly HintButton[])[] = [
 	[
-		{ label: "⏎ open", action: { type: "activate-folder" } },
+		{ label: "⏎ move", action: { type: "folder-move" } },
 		{ label: "tab move", action: { type: "folder-move" } },
 		{ label: "esc back", action: { type: "folder-back" } },
 	],

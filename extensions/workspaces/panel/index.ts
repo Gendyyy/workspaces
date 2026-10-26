@@ -2,6 +2,7 @@
  * Workspaces overlay panel. Owns UI state and dispatches every keyboard, mouse,
  * and hint-button intention through one action path.
  */
+import { isAbsolute } from "node:path";
 import {
 	expandHome,
 	parentDirectory,
@@ -37,6 +38,10 @@ import {
 } from "./render.ts";
 
 export type { PanelAction } from "./actions.ts";
+
+function isAbsoluteDirectoryInput(path: string): boolean {
+	return isAbsolute(path) || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
 
 export interface PanelDeps {
 	theme: Theme;
@@ -99,6 +104,7 @@ export class WorkspacePanel implements Component {
 	private folderPath: string;
 	private folderPurpose: FolderPurpose = "new-session";
 	private moveTarget?: SessionRow;
+	private moveSourceCwd?: string;
 	private folderRows: FolderRow[] = [];
 	private folderSelected = 0;
 	private folderScroll = 0;
@@ -407,6 +413,7 @@ export class WorkspacePanel implements Component {
 			this.mode = "list";
 			this.folderFilter = "";
 			this.moveTarget = undefined;
+			this.moveSourceCwd = undefined;
 			this.hover = undefined;
 			this.tui.requestRender();
 			return;
@@ -500,12 +507,13 @@ export class WorkspacePanel implements Component {
 				closed = true;
 				break;
 			case "folder-move":
-				closed = this.moveFolder(this.folderPath);
+				closed = this.moveFolder(action.path);
 				break;
 			case "folder-back":
 				this.mode = "list";
 				this.folderFilter = "";
 				this.moveTarget = undefined;
+				this.moveSourceCwd = undefined;
 				break;
 			case "activate-folder":
 				this.activateFolder();
@@ -616,6 +624,7 @@ export class WorkspacePanel implements Component {
 			return;
 		}
 		this.moveTarget = entry.session;
+		this.moveSourceCwd = entry.workspace.cwd;
 		this.openFolderBrowser("move-session");
 	}
 
@@ -674,6 +683,7 @@ export class WorkspacePanel implements Component {
 			this.mode = "list";
 			this.folderFilter = "";
 			this.moveTarget = undefined;
+			this.moveSourceCwd = undefined;
 			return;
 		}
 		this.mode = "list";
@@ -698,30 +708,58 @@ export class WorkspacePanel implements Component {
 	private reloadFolderRows(): void {
 		this.folderManualScroll = false;
 		this.folderScroll = 0;
-		const existing = listDirectories(this.folderPath);
-		const rows: FolderRow[] = [{ kind: this.folderPurpose === "move-session" ? "move" : "create", path: this.folderPath }];
+		const query = this.folderFilter.trim();
+		if (this.folderPurpose === "move-session") {
+			const rows: FolderRow[] = [];
+			const typed = expandHome(query);
+			if (typed && isAbsoluteDirectoryInput(typed)) {
+				const path = canonicalPath(typed);
+				if (path && listDirectories(path).error === undefined) {
+					if (canonicalPath(this.moveSourceCwd) === path) {
+						this.notice = { text: "That is already the session’s workspace", tone: "error" };
+					} else {
+						rows.push({ kind: "custom", path });
+					}
+				} else {
+					this.notice = { text: "Enter an existing directory path", tone: "error" };
+				}
+			} else {
+				const source = canonicalPath(this.moveSourceCwd);
+				const seen = new Set<string>();
+				const workspaces = [...this.workspaces].sort((left, right) =>
+					left.isCurrent === right.isCurrent ? left.label.localeCompare(right.label) : left.isCurrent ? -1 : 1,
+				);
+				for (const workspace of workspaces) {
+					if (!workspace.cwd || workspace.missing) continue;
+					const key = canonicalPath(workspace.cwd) ?? workspace.cwd;
+					if (key === source || seen.has(key)) continue;
+					seen.add(key);
+					if (query && !`${workspace.label} ${workspace.cwd}`.toLowerCase().includes(query.toLowerCase())) continue;
+					rows.push({ kind: "workspace", path: workspace.cwd, label: workspace.label });
+				}
+				if (query && rows.length === 0) this.notice = { text: "No matching workspace; type an absolute path", tone: "info" };
+			}
+			this.folderRows = rows;
+			this.folderSelected = Math.max(0, Math.min(this.folderSelected, rows.length - 1));
+			this.tui.requestRender();
+			return;
+		}
 
-		const typed = expandHome(this.folderFilter.trim());
+		const existing = listDirectories(this.folderPath);
+		const rows: FolderRow[] = [{ kind: "create", path: this.folderPath }];
+		const typed = expandHome(query);
 		if (typed && typed !== this.folderPath && (typed.startsWith("/") || typed.startsWith("~"))) {
 			const listed = listDirectories(typed);
 			if (!listed.error) rows.push({ kind: "jump", path: typed });
 		}
-
-		const query = this.folderFilter.trim().toLowerCase();
 		if (!query || query.startsWith("/") || query.startsWith("~")) {
 			const parent = parentDirectory(this.folderPath);
 			if (parent) rows.push({ kind: "parent", path: parent });
 		}
-
 		const dirs = existing.entries.filter(
-			(entry) =>
-				!query ||
-				query.startsWith("/") ||
-				query.startsWith("~") ||
-				entry.name.toLowerCase().includes(query),
+			(entry) => !query || query.startsWith("/") || query.startsWith("~") || entry.name.toLowerCase().includes(query.toLowerCase()),
 		);
 		for (const entry of dirs) rows.push({ kind: "dir", entry });
-
 		this.folderRows = rows;
 		this.folderSelected = Math.max(0, Math.min(this.folderSelected, rows.length - 1));
 		this.tui.requestRender();
@@ -742,7 +780,8 @@ export class WorkspacePanel implements Component {
 			case "create":
 				this.done({ type: "new-session", cwd: row.path });
 				return;
-			case "move":
+			case "workspace":
+			case "custom":
 				this.moveFolder(row.path);
 				return;
 			case "jump":
@@ -755,9 +794,15 @@ export class WorkspacePanel implements Component {
 		}
 	}
 
-	private moveFolder(targetCwd: string): boolean {
+	private moveFolder(targetCwd?: string): boolean {
 		if (!this.moveTarget) return false;
-		this.done({ type: "move-session", sessionPath: this.moveTarget.path, targetCwd, isCurrent: this.moveTarget.isCurrent });
+		const row = this.folderRows[this.folderSelected];
+		const destination = targetCwd ?? (row?.kind === "workspace" || row?.kind === "custom" ? row.path : undefined);
+		if (!destination) {
+			this.notice = { text: "Choose a workspace or enter an existing directory path", tone: "error" };
+			return false;
+		}
+		this.done({ type: "move-session", sessionPath: this.moveTarget.path, targetCwd: destination, isCurrent: this.moveTarget.isCurrent });
 		return true;
 	}
 

@@ -60,7 +60,7 @@ export function folderKeyAction(data: string, moving = false): HitAction | undef
 	if (matchesKey(data, Key.down)) return { type: "move-folder-selection", delta: 1 };
 	if (matchesKey(data, Key.pageUp)) return { type: "move-folder-selection", delta: -5 };
 	if (matchesKey(data, Key.pageDown)) return { type: "move-folder-selection", delta: 5 };
-	if (matchesKey(data, Key.enter) || matchesKey(data, Key.return)) return { type: "activate-folder" };
+	if (matchesKey(data, Key.enter) || matchesKey(data, Key.return)) return moving ? { type: "folder-move" } : { type: "activate-folder" };
 	if (matchesKey(data, Key.tab)) return moving ? { type: "folder-move" } : { type: "folder-create" };
 	return undefined;
 }

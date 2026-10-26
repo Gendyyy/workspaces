@@ -3,6 +3,9 @@
  * modal flows behave the same whichever input drives them.
  */
 import { describe, expect, test } from "bun:test";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { canonicalPath, expandHome } from "../extensions/workspaces/data.ts";
 import { hintRowsFor, type HitAction } from "../extensions/workspaces/panel/actions.ts";
 import { deleteKeyAction, folderKeyAction, listKeyAction, renameKeyAction } from "../extensions/workspaces/panel/keys.ts";
 import { PanelHarness } from "./harness.ts";
@@ -70,8 +73,9 @@ describe("keyboard parity", () => {
 		}
 	});
 
-	test("move folder confirmation matches tab", () => {
+	test("move folder confirmation matches Enter and Tab", () => {
 		const folder = buttons("move-folder");
+		expect(folderKeyAction("\r", true)).toEqual(expectedAction(folder, "folder-move"));
 		expect(folderKeyAction("\t", true)).toEqual(expectedAction(folder, "folder-move"));
 	});
 
@@ -93,22 +97,44 @@ function expectedAction(list: ReturnType<typeof buttons>, type: string): HitActi
 	return action;
 }
 
+describe("directory path input", () => {
+	test("expands forward- and backslash home paths", () => {
+		expect(expandHome("~/workspaces")).toBe(join(homedir(), "workspaces"));
+		expect(expandHome("~\\workspaces")).toBe(join(homedir(), "workspaces"));
+	});
+});
+
 describe("modal flows", () => {
-	test("m opens a destination browser and tab selects the current folder", () => {
+	test("m lists other active workspaces and Enter selects the destination", () => {
 		const h = new PanelHarness();
 		h.render();
 		h.key("\x1b[B");
 		h.key("m");
 		const folder = h.render().join("\n");
 		expect(folder).toContain("Move session");
-		expect(folder).toContain("Move session here");
-		h.key("\t");
+		expect(folder).toContain("beta");
+		expect(folder).not.toContain("Move session here");
+		h.key("\r");
 		expect(h.actions).toEqual([{
 			type: "move-session",
 			sessionPath: "/tmp/sessions/Alpha session 7.jsonl",
-			targetCwd: "/tmp",
+			targetCwd: "/tmp/beta",
 			isCurrent: false,
 		}]);
+	});
+
+	test("typing an absolute path creates a custom destination", () => {
+		const h = new PanelHarness();
+		h.render();
+		h.key("\x1b[B");
+		h.key("m");
+		h.key(homedir());
+		expect(h.render().join("\n")).toContain("Use ");
+		h.key("\t");
+		expect(h.actions[0]).toMatchObject({
+			type: "move-session",
+			targetCwd: canonicalPath(homedir()),
+		});
 	});
 
 	test("rename saves the edited title through the save button", () => {

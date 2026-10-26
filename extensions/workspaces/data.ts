@@ -441,7 +441,7 @@ export function parentDirectory(dir: string): string | undefined {
 /** Expand a leading `~` so typed paths work in the folder browser. */
 export function expandHome(path: string): string {
 	if (path === "~") return HOME;
-	if (path.startsWith("~/")) return join(HOME, path.slice(2));
+	if (path.startsWith("~/") || path.startsWith("~\\")) return join(HOME, path.slice(2));
 	return path;
 }
 
